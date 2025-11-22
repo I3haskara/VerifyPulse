@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VerifyPulse Agent Dashboard</title>
+    <!-- Load Tailwind CSS and Inter Font -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <!-- Load Lucide Icons -->
+    <script type="module" src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --primary-color: #10b981; /* Emerald 500 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .tool-status-active {
+            box-shadow: 0 0 10px var(--primary-color);
+            transform: scale(1.02);
+        }
+        .main-output-iframe {
+            /* Styles the iframe that shows the final HTML report */
+            width: 100%;
+            height: 80vh;
+            border: none;
+            border-radius: 0.5rem;
+            background-color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        /* Custom animation for visual interest */
+        @keyframes pulse-emerald {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+            }
+        }
+        #run-button {
+            animation: pulse-emerald 2s infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Header -->
+    <header class="bg-white shadow-md p-4 sticky top-0 z-10">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-900 flex items-center">
+                <span class="text-3xl mr-2 text-emerald-500">
+                    <i data-lucide="scan"></i>
+                </span>
+                VerifyPulse Agent (AFA)
+            </h1>
+            <span id="autonomy-status" class="px-4 py-2 rounded-full text-sm font-semibold bg-green-100 text-green-700">
+                <i data-lucide="cpu" class="w-4 h-4 inline mr-1"></i>
+                Autonomy Loop: RUNNING
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Left Sidebar: Tools, Input, History -->
+        <div class="lg:col-span-1 space-y-6">
+            
+            <!-- Tool Status Visualization (The 4 Pillars) -->
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Agent Lifecycle & Tools (4/4 Integrated)</h2>
+                <div id="tool-visualization" class="grid grid-cols-2 gap-4">
+                    <!-- Tool Statuses will be injected here -->
+                </div>
+            </div>
+
+            <!-- Manual Input / Run Trigger (Copy-Paste & Run Diagnostics) -->
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Copy-Paste & Run Diagnostics (RCA)</h2>
+                <textarea id="requirement-input" class="w-full h-24 p-3 border border-gray-300 rounded-lg focus:ring-emerald-500 focus:border-emerald-500 text-sm" placeholder="Paste: Failing API Trace (JSON) or Postman Collection Link..."></textarea>
+                <button id="run-button" class="mt-4 w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 flex items-center justify-center">
+                    <span id="run-icon"><i data-lucide="play" class="w-5 h-5 mr-2"></i></span>
+                    <span id="run-text">Run Full Diagnostic Pipeline</span>
+                </button>
+                <p class="text-xs text-gray-500 mt-2 text-center">Input is tokenized by Skyflow before processing.</p>
+            </div>
+            
+            <!-- Run History -->
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Run History</h2>
+                <div id="history-list" class="space-y-3">
+                    <!-- Mock History items -->
+                    <div class="flex justify-between items-center text-sm p-3 bg-red-50 rounded-lg">
+                        <span class="text-red-700 font-medium">Auto-Run (PII Exposure)</span>
+                        <span class="text-xs text-red-500">3 minutes ago</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm p-3 bg-gray-100 rounded-lg">
+                        <span class="text-gray-700 font-medium">Manual Run (Success)</span>
+                        <span class="text-xs text-gray-500">1 hour ago</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Output Pane: AFA Report -->
+        <div class="lg:col-span-2">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Automated Failure Analysis (AFA) Report</h2>
+            <iframe id="afa-report-frame" class="main-output-iframe"></iframe>
+        </div>
+
+    </main>
+
+    <script type="module">
+        // FIX: The Lucide library is imported as a module. We need to import the 'lucide' object
+        // and then call createIcons() within this module's scope to guarantee availability.
+        import * as lucide from 'https://unpkg.com/lucide@latest';
+
+        // Initialize Lucide icons on window load (after DOM is ready)
+        window.onload = () => {
+            lucide.createIcons();
+            renderToolStatuses();
+        };
+
+        const API_BASE_URL = "http://127.0.0.1:8000";
+
+        // --- Tool Visualization Data ---
+        const tools = [
+            { name: "Parallel AI", icon: "zap", purpose: "1. Planning" },
+            { name: "Postman", icon: "activity", purpose: "2. Execution" },
+            { name: "RedisVL", icon: "database", purpose: "3. RAG/Diagnosis" },
+            { name: "Skyflow", icon: "lock", purpose: "Data Security" }
+        ];
+
+        // --- Mock Data from Python agent_logic.py (Updated to emphasize Postman value) ---
+        const MOCK_HTML_REPORT_CONTENT = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Failure Analysis Report</title>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f7f7; padding: 20px; }
+        .container { max-width: 900px; margin: auto; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .header { border-bottom: 2px solid #10b981; padding-bottom: 15px; margin-bottom: 25px; }
+        .category { font-size: 1.5rem; font-weight: 700; color: #10b981; margin-bottom: 10px; }
+        .section-title { font-size: 1.25rem; font-weight: 600; color: #333; margin-top: 20px; margin-bottom: 10px; padding-left: 10px; border-left: 4px solid #10b981; }
+        pre { background: #1e293b; color: #f8fafc; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 0.875rem; }
+        code { font-family: monospace; }
+        .alert { padding: 10px 15px; background: #fee2e2; color: #dc2626; border-radius: 6px; margin-top: 10px; }
+        .value-prop { border: 2px solid #3b82f6; background-color: #eff6ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; color: #1e40af; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+        <div class="value-prop">
+            🎯 **Postman Value Proposition:** This report eliminates the 13 hours of manual debugging (reproduction, RCA) you would normally spend on your failing Postman test.
+        </div>
+
+        <div class="header">
+            <h1 style="font-size: 2rem; color: #1f2937;">Automated Failure Analysis (AFA) Report</h1>
+            <p style="color: #6b7280;">Generated from a failing **Postman Run** by VerifyPulse Agent (v1.0.0) at ${new Date().toLocaleTimeString()}</p>
+        </div>
+
+        <div class="category">FAILURE CATEGORY: Product Bug (Security/Data Exposure)</div>
+
+        <div class="section-title">Root Cause Summary (The "Why" - RAG Powered)</div>
+        <p>The grade retrieval endpoint is incorrectly utilizing an outdated serialization schema. A code merge in commit 4a8e2d reintroduced the 'ssn' field during database hydration, despite the security policy requiring masking. The **RedisVL RAG system** correlated the failing test log with the code change in <code>models.py</code> and the internal PII policy document.</p>
+
+        <div class="section-title">Suggested Fix (Code-Level Recommendation)</div>
+        <pre><code>File: models.py, Line 78. Change \`include_ssn=True\` to \`include_ssn=False\` in the user schema serializer.</code></pre>
+
+        <div class="section-title">Reproduction Steps (The 41% Solution)</div>
+        <p style="color: #4b5563; font-style: italic;">Use this command to verify the fix in your local terminal (or re-run your Postman collection after fix):</p>
+        <pre><code>curl -X GET 'https://api.prod/v1/grades?user=123' -H 'Authorization: Bearer token'</code></pre>
+        
+        <div class="section-title">Raw Log Context</div>
+        <div class="alert">Test Run ID: auto-run-123456 | Endpoint: /api/v1/grades</div>
+        <pre><code>{
+  "endpoint": "/api/v1/grades",
+  "method": "GET",
+  "error_type": "AssertionError: SSN field is present in response",
+  "full_response": "{\"user_id\": 123, \"ssn\": \"[TOKENIZED_BY_SKYFLOW]\"}",
+  "request_headers": {
+    "Authorization": "Bearer token"
+  }
+}</code></pre>
+
+    </div>
+</body>
+</html>
+        `;
+
+        // --- UI Rendering Functions ---
+        function renderToolStatuses() {
+            const container = document.getElementById('tool-visualization');
+            container.innerHTML = tools.map(tool => `
+                <div id="tool-${tool.name.toLowerCase().replace(/\s/g, '-')}" 
+                     class="tool-card p-3 rounded-lg border border-gray-200 transition duration-300">
+                    <div class="flex items-center space-x-2 mb-1">
+                        <i data-lucide="${tool.icon}" class="w-5 h-5 text-gray-500"></i>
+                        <span class="font-semibold text-gray-800">${tool.name}</span>
+                    </div>
+                    <p class="text-xs text-gray-500">${tool.purpose}</p>
+                    <span class="status-badge mt-2 block w-full text-center text-xs font-bold py-1 rounded-full bg-gray-100 text-gray-500">PENDING</span>
+                </div>
+            `).join('');
+            // Re-render icons after adding new HTML content
+            lucide.createIcons();
+        }
+
+        function updateToolStatus(toolName, status = 'ACTIVE', active = true) {
+            const id = `tool-${toolName.toLowerCase().replace(/\s/g, '-')}`;
+            const card = document.getElementById(id);
+            const badge = card ? card.querySelector('.status-badge') : null;
+
+            if (card) {
+                card.classList.toggle('tool-status-active', active);
+                card.classList.toggle('bg-white', !active);
+                card.classList.toggle('bg-green-50', active);
+
+                if (badge) {
+                    badge.textContent = status;
+                    badge.className = 'status-badge mt-2 block w-full text-center text-xs font-bold py-1 rounded-full';
+                    if (active) {
+                        badge.classList.add('bg-emerald-500', 'text-white');
+                    } else {
+                        badge.classList.add('bg-gray-100', 'text-gray-500');
+                    }
+                }
+            }
+        }
+
+        function displayReport(htmlContent) {
+            const iframe = document.getElementById('afa-report-frame');
+            const doc = iframe.contentWindow.document;
+            doc.open();
+            doc.write(htmlContent);
+            doc.close();
+        }
+
+        function addHistoryItem(text, type = 'success') {
+            const list = document.getElementById('history-list');
+            const color = type === 'success' ? 'bg-green-50' : 'bg-red-50';
+            const textColor = type === 'success' ? 'text-green-700' : 'text-red-700';
+
+            const newItem = document.createElement('div');
+            newItem.className = `flex justify-between items-center text-sm p-3 ${color} rounded-lg`;
+            newItem.innerHTML = `
+                <span class="${textColor} font-medium">${text}</span>
+                <span class="text-xs text-gray-500">${new Date().toLocaleTimeString()}</span>
+            `;
+            list.prepend(newItem); // Add to the top
+        }
+
+        // --- Agent Workflow Simulation ---
+        async function runPipeline() {
+            const runButton = document.getElementById('run-button');
+            const runIcon = document.getElementById('run-icon');
+            const runText = document.getElementById('run-text');
+            const requirement = document.getElementById('requirement-input').value || "Grades API must not expose full SSN";
+            
+            runButton.disabled = true;
+            runText.textContent = 'Running Diagnostics...';
+            runIcon.innerHTML = '<i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i>';
+            lucide.createIcons();
+            
+            // 1. Parallel AI (Planning)
+            updateToolStatus('Parallel AI', 'Planning', true);
+            updateToolStatus('Skyflow', 'Tokenizing Input', true);
+            await new Promise(r => setTimeout(r, 500)); 
+
+            // 2. Postman (Execution)
+            updateToolStatus('Parallel AI', 'Done', false);
+            updateToolStatus('Skyflow', 'Done', false);
+            updateToolStatus('Postman', 'Executing Test', true);
+            await new Promise(r => setTimeout(r, 1000));
+            
+            // 3. RedisVL / RAG (Diagnosis)
+            updateToolStatus('Postman', 'Failure Detected', false);
+            updateToolStatus('RedisVL', 'RAG Diagnosis', true);
+            
+            // 4. Final Reporting
+            await new Promise(r => setTimeout(r, 1500));
+            
+            // --- ACTUAL API CALL (or Mock if Backend not running) ---
+            try {
+                // In a real scenario, you would uncomment the following to hit your FastAPI backend:
+                
+                // const response = await fetch(`${API_BASE_URL}/run`, {
+                //     method: 'POST',
+                //     headers: { 'Content-Type': 'application/json' },
+                //     body: JSON.stringify({ requirement: requirement })
+                // });
+                // const result = await response.json();
+                
+                // // Assuming the response is successful and contains the HTML report
+                // if (result.status === "FAILURE_DIAGNOSED") {
+                //     displayReport(result.html_report_content);
+                //     addHistoryItem("Manual Run (FAILURE DIAGNOSED)", 'failure');
+                // } else {
+                //     // Handle other cases
+                // }
+
+
+                // --- MOCK SUCCESS PATH ---
+                displayReport(MOCK_HTML_REPORT_CONTENT);
+                addHistoryItem("Manual Run: " + requirement.substring(0, 30) + "...", 'failure');
+                
+            } catch (error) {
+                displayReport(`<h1>Error: Could not connect to FastAPI Backend at ${API_BASE_URL}</h1><p>Please ensure your Python server is running (Step 1 of the demo).</p>`);
+                addHistoryItem("Manual Run (Connection Error)", 'failure');
+                console.error("Fetch Error:", error);
+            }
+            
+            // Reset UI
+            updateToolStatus('Parallel AI', 'PENDING', false);
+            updateToolStatus('Postman', 'PENDING', false);
+            updateToolStatus('RedisVL', 'PENDING', false);
+            updateToolStatus('Skyflow', 'PENDING', false);
+
+            runButton.disabled = false;
+            runText.textContent = 'Run Full Diagnostic Pipeline';
+            runIcon.innerHTML = '<i data-lucide="play" class="w-5 h-5 mr-2"></i>';
+            lucide.createIcons();
+        }
+
+        // --- Event Listener ---
+        document.getElementById('run-button').addEventListener('click', runPipeline);
+        
+        // Initial display of a placeholder report
+        displayReport(`
+            <div style="padding: 2rem; text-align: center; color: #4b5563;">
+                <h2 style="font-size: 1.5rem; font-weight: 600;">Welcome to VerifyPulse Agent</h2>
+                <p>Paste a failing API trace or Postman link and run the diagnostics to instantly receive the root cause analysis.</p>
+                <i data-lucide="search-check" style="width: 64px; height: 64px; margin: 20px auto; color: #9ca3af;"></i>
+                <p style="margin-top: 20px;">The Automated Failure Analysis (AFA) report will appear here.</p>
+            </div>
+        `);
+        // We must call lucide.createIcons() here to render the initial icons (like search-check)
+        lucide.createIcons();
+
+    </script>
+</body>
+</html>
